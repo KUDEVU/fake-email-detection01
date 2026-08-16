@@ -1,38 +1,21 @@
 import os
 import re
+import requests
 from flask import Flask, redirect, url_for, session, render_template_string, request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
-
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_secret_key_fixed_9988")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_secret_key_production_2026")
+app.config['SESSION_COOKIE_NAME'] = 'devu_session'
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-SCOPES = [
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'openid',
-    'https://www.googleapis.com/auth/userinfo.email'
-]
-
+CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 REDIRECT_URI = "https://fake-email-detection01.onrender.com/oauth2callback"
-
-def get_client_config():
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-    return {
-        "web": {
-            "client_id": client_id,
-            "project_id": "fake-email-detection",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_secret": client_secret,
-            "redirect_uris": [REDIRECT_URI]
-        }
-    }
+AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 DEVU_TEMPLATE = """
 <!DOCTYPE html>
@@ -86,12 +69,12 @@ DEVU_TEMPLATE = """
                 <svg class="shield-icon" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
                 DEVU
             </div>
-            {% if session.get('credentials') %}
+            {% if session.get('token') %}
             <a href="/logout" class="disconnect-btn">Disconnect</a>
             {% endif %}
         </div>
 
-        {% if not session.get('credentials') %}
+        {% if not session.get('token') %}
         <div class="login-card">
             <h2>Welcome to DEVU</h2>
             <p style="color:#64748b; margin-top:10px;">Full-scale automated email scan with real-time spam & threat confidence analytics.</p>
@@ -153,7 +136,7 @@ DEVU_TEMPLATE = """
 def detect_threat(subject, snippet, sender):
     suspicious_patterns = [
         r"exposed", r"security alert", r"password reset", r"unauthorized", 
-        r"verify your account", r"suspended", r"leak", r"compromised", r"action required", r"urgent"
+        r"verify your account", r"suspended", r"leak", r"compromised", r"action required", r"urgent", r"winner", r"lottery"
     ]
     combined_text = f"{subject} {snippet} {sender}".lower()
     for pattern in suspicious_patterns:
@@ -163,10 +146,10 @@ def detect_threat(subject, snippet, sender):
 
 @app.route("/")
 def index():
-    if "credentials" not in session:
+    if "token" not in session:
         return render_template_string(DEVU_TEMPLATE, emails=[], safe_count=0, threat_count=0, current_filter="all")
 
-    creds = Credentials(**session["credentials"])
+    creds = Credentials(token=session["token"])
     service = build("gmail", "v1", credentials=creds)
 
     filter_type = request.args.get("filter", "all")
@@ -235,48 +218,44 @@ def index():
 
 @app.route("/login")
 def login():
-    flow = Flow.from_client_config(
-        get_client_config(),
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", CLIENT_ID).strip()
+    scopes = "https://www.googleapis.com/auth/gmail.readonly openid email"
+    auth_url = (
+        f"{AUTH_URI}?client_id={client_id}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code"
+        f"&scope={scopes}"
+        f"&access_type=offline"
+        f"&prompt=consent"
     )
-    authorization_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
-    )
-    session["state"] = state
-    # Save code_verifier explicitly to fix "Missing code verifier"
-    if hasattr(flow, "code_verifier") and flow.code_verifier:
-        session["code_verifier"] = flow.code_verifier
-    return redirect(authorization_url)
+    return redirect(auth_url)
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    state = session.get("state")
-    flow = Flow.from_client_config(
-        get_client_config(),
-        scopes=SCOPES,
-        state=state,
-        redirect_uri=REDIRECT_URI
+    code = request.args.get("code")
+    if not code:
+        return "Authentication Failed: No code returned", 400
+
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", CLIENT_ID).strip()
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", CLIENT_SECRET).strip()
+
+    # Direct Token Exchange (Guaranteed no PKCE/Verifier errors)
+    token_response = requests.post(
+        TOKEN_URI,
+        data={
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }
     )
-    
-    # Restore code_verifier
-    if "code_verifier" in session:
-        flow.code_verifier = session["code_verifier"]
 
-    callback_url = request.url.replace("http://", "https://", 1)
+    token_json = token_response.json()
+    if "access_token" not in token_json:
+        return f"Token Error: {token_json}", 500
 
-    flow.fetch_token(authorization_response=callback_url)
-    creds = flow.credentials
-    session["credentials"] = {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": creds.scopes,
-    }
+    session["token"] = token_json["access_token"]
     return redirect(url_for("index"))
 
 @app.route("/logout")
