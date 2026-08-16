@@ -20,7 +20,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly'
 ]
 
-# --- Load ML Model & Vectorizer ---
+# --- Load ML Model & Vectorizer Safely ---
 model = None
 vectorizer = None
 
@@ -33,24 +33,33 @@ except Exception as e:
     print(f"Model load warning: {e}")
 
 def predict_email(text):
-    if model and vectorizer:
+    if not text:
+        return "Safe"
+        
+    # Heuristic check for common phishing keywords
+    suspicious_patterns = [
+        r'verify', r'urgent', r'bank', r'password', 
+        r'suspend', r'login', r'click here', 
+        r'account blocked', r'update payment', r'security alert'
+    ]
+    if any(re.search(p, text, re.IGNORECASE) for p in suspicious_patterns):
+        return "Phishing"
+
+    # ML Model Prediction with exception fallback
+    if model is not None and vectorizer is not None:
         try:
             vec = vectorizer.transform([text])
             pred = model.predict(vec)[0]
             return "Phishing" if pred == 1 else "Safe"
-        except Exception:
-            pass
-    # Fallback heuristic
-    suspicious_words = ['verify', 'urgent', 'bank', 'password', 'suspend', 'login', 'click here']
-    return "Phishing" if any(w in text.lower() for w in suspicious_words) else "Safe"
+        except Exception as e:
+            print(f"Prediction error: {e}")
+            
+    return "Safe"
 
 
 # --- Helper for OAuth Flow ---
 def get_flow():
-    # Dynamic redirect URI so it works locally and on Render
     redirect_uri = url_for('callback', _external=True)
-    
-    # Ensure HTTPS scheme in production
     if request.headers.get('X-Forwarded-Proto') == 'https':
         redirect_uri = redirect_uri.replace('http://', 'https://')
         
@@ -92,7 +101,6 @@ def callback():
     state = session.get('state')
     flow = get_flow()
     
-    # Reconstruct request URL with HTTPS if behind Render proxy
     req_url = request.url
     if request.headers.get('X-Forwarded-Proto') == 'https':
         req_url = req_url.replace('http://', 'https://')
@@ -120,7 +128,8 @@ def scan_inbox():
 
     try:
         service = build('gmail', 'v1', credentials=credentials)
-        results = service.users().messages().list(userId='me', maxResults=5).execute()
+        # Fetching max 3 emails for fast scanning
+        results = service.users().messages().list(userId='me', maxResults=3).execute()
         messages = results.get('messages', [])
         
         scanned_emails = []
