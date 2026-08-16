@@ -5,42 +5,45 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_key_change_me")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_devu_key_987")
 
-# Gmail Readonly Scope
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-# OAuth credentials setup from file or environment
-CLIENT_SECRETS_FILE = "credentials.json"
-
+# OAuth Client Config from Environment Variables
+def get_client_config():
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    return {
+        "web": {
+            "client_id": client_id,
+            "project_id": "fake-email-detection",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": client_secret,
+            "redirect_uris": ["https://fake-email-detection01.onrender.com/oauth2callback"]
+        }
+    }
 
 @app.route("/")
 def index():
     if "credentials" not in session:
-        return '<a href="/login"><button>Login with Google</button></a>'
+        return '<a href="/login"><button style="padding:10px 20px; font-size:16px; cursor:pointer;">Login with Google</button></a>'
 
-    # Load stored user credentials from session
     creds = Credentials(**session["credentials"])
     service = build("gmail", "v1", credentials=creds)
 
     emails_data = []
+    req = service.users().messages().list(userId="me", maxResults=50)
 
-    # Initialize request to list emails without strict result slicing
-    request = service.users().messages().list(userId="me", maxResults=50)
-
-    # Paginate through inbox messages
-    while request is not None:
-        response = request.execute()
+    while req is not None:
+        response = req.execute()
         messages = response.get("messages", [])
-
         if not messages:
             break
 
         for msg in messages:
-            msg_detail = service.users().messages().get(
-                userId="me", id=msg["id"], format="full"
-            ).execute()
-
+            msg_detail = service.users().messages().get(userId="me", id=msg["id"], format="full").execute()
             headers = msg_detail.get("payload", {}).get("headers", [])
             subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
             sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
@@ -55,16 +58,10 @@ def index():
                 "body": snippet,
             })
 
-        # Fetch next page if available, otherwise breaks the loop
-        request = service.users().messages().list_next(
-            previous_request=request, previous_response=response
-        )
-
-        # Safety cap: stops after 100 emails to prevent long request timeouts
+        req = service.users().messages().list_next(previous_request=req, previous_response=response)
         if len(emails_data) >= 100:
             break
 
-    # Inline HTML template to display all fetched emails
     html_template = """
     <!DOCTYPE html>
     <html>
@@ -94,35 +91,29 @@ def index():
     </body>
     </html>
     """
-
     return render_template_string(html_template, emails=emails_data)
-
 
 @app.route("/login")
 def login():
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    flow = Flow.from_client_config(
+        get_client_config(),
         scopes=SCOPES,
-        redirect_uri=url_for("oauth2callback", _external=True),
+        redirect_uri=url_for("oauth2callback", _external=True)
     )
-    authorization_url, state = flow.authorization_url(
-        access_type="offline", include_granted_scopes="true"
-    )
+    authorization_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true")
     session["state"] = state
     return redirect(authorization_url)
 
-
 @app.route("/oauth2callback")
 def oauth2callback():
-    state = session["state"]
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    state = session.get("state")
+    flow = Flow.from_client_config(
+        get_client_config(),
         scopes=SCOPES,
         state=state,
-        redirect_uri=url_for("oauth2callback", _external=True),
+        redirect_uri=url_for("oauth2callback", _external=True)
     )
     flow.fetch_token(authorization_response=request.url)
-
     creds = flow.credentials
     session["credentials"] = {
         "token": creds.token,
@@ -132,17 +123,13 @@ def oauth2callback():
         "client_secret": creds.client_secret,
         "scopes": creds.scopes,
     }
-
     return redirect(url_for("index"))
-
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("index"))
 
-
 if __name__ == "__main__":
-    # Required for testing on local HTTP (remove in production if HTTPS is enforced)
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     app.run(host="0.0.0.0", port=5000, debug=True)
