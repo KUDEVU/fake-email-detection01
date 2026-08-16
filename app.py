@@ -119,6 +119,7 @@ def callback():
 
 
 @app.route('/scan', methods=['GET', 'POST'])
+@app.route('/filter', methods=['GET', 'POST'])
 def scan_inbox():
     if 'credentials' not in session:
         return redirect(url_for('login'))
