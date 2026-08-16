@@ -5,14 +5,20 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-# Essential for OAuth behind Render proxy
+# Disable HTTPS check on proxy & relax scope checks
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_super_secret_key_12345")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_devu_secret_998877")
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'openid',
+    'https://www.googleapis.com/auth/userinfo.email'
+]
+
+REDIRECT_URI = "https://fake-email-detection01.onrender.com/oauth2callback"
 
 def get_client_config():
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
@@ -25,11 +31,10 @@ def get_client_config():
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
             "client_secret": client_secret,
-            "redirect_uris": ["https://fake-email-detection01.onrender.com/oauth2callback"]
+            "redirect_uris": [REDIRECT_URI]
         }
     }
 
-# Complete DEVU Analytics UI Template
 DEVU_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -44,10 +49,9 @@ DEVU_TEMPLATE = """
         .navbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
         .logo-box { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 24px; color: #2563eb; }
         .shield-icon { width: 28px; height: 28px; fill: #2563eb; }
-        .disconnect-btn { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border: 1.5px solid #ef4444; color: #ef4444; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; background: white; transition: 0.2s; }
+        .disconnect-btn { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border: 1.5px solid #ef4444; color: #ef4444; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; background: white; }
         .disconnect-btn:hover { background: #fee2e2; }
         
-        /* Stats Cards */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
         .stat-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center; }
         .stat-title { font-size: 13px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 6px; }
@@ -56,13 +60,11 @@ DEVU_TEMPLATE = """
         .stat-safe { color: #16a34a; }
         .stat-threat { color: #dc2626; }
 
-        /* Filter Bar */
         .filter-bar { background: white; padding: 14px 20px; border-radius: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex-wrap: wrap; gap: 10px; }
         .filter-form { display: flex; align-items: center; gap: 10px; }
         .filter-select { padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13.5px; outline: none; }
         .filter-submit { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
-        /* Email Card Layout */
         .email-card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); border-left: 6px solid #16a34a; }
         .email-card.threat { border-left-color: #dc2626; }
         .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
@@ -97,7 +99,6 @@ DEVU_TEMPLATE = """
             <a href="/login" class="login-btn">Login with Google</a>
         </div>
         {% else %}
-        <!-- Stats Dashboard Counters -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-title">Emails Scanned</div>
@@ -113,7 +114,6 @@ DEVU_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Filter Bar -->
         <div class="filter-bar">
             <div style="font-size:14px; font-weight:600; color:#334155;">Showing {{ emails|length }} scanned emails</div>
             <form method="GET" action="/" class="filter-form">
@@ -127,7 +127,6 @@ DEVU_TEMPLATE = """
             </form>
         </div>
 
-        <!-- Emails List -->
         {% for email in emails %}
         <div class="email-card {% if email.is_threat %}threat{% endif %}">
             <div class="card-top">
@@ -153,10 +152,9 @@ DEVU_TEMPLATE = """
 """
 
 def detect_threat(subject, snippet, sender):
-    # Rule-based threat/phishing detection check
     suspicious_patterns = [
         r"exposed", r"security alert", r"password reset", r"unauthorized", 
-        r"verify your account", r"suspended", r"leak", r"compromised", r"action required"
+        r"verify your account", r"suspended", r"leak", r"compromised", r"action required", r"urgent"
     ]
     combined_text = f"{subject} {snippet} {sender}".lower()
     for pattern in suspicious_patterns:
@@ -194,28 +192,31 @@ def index():
             break
 
         for msg in messages:
-            msg_detail = service.users().messages().get(userId="me", id=msg["id"], format="full").execute()
-            headers = msg_detail.get("payload", {}).get("headers", [])
-            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
-            sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
-            date = next((h["value"] for h in headers if h["name"] == "Date"), "")
-            snippet = msg_detail.get("snippet", "")
+            try:
+                msg_detail = service.users().messages().get(userId="me", id=msg["id"], format="full").execute()
+                headers = msg_detail.get("payload", {}).get("headers", [])
+                subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
+                sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
+                date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+                snippet = msg_detail.get("snippet", "")
 
-            is_threat, confidence = detect_threat(subject, snippet, sender)
-            if is_threat:
-                threat_count += 1
-            else:
-                safe_count += 1
+                is_threat, confidence = detect_threat(subject, snippet, sender)
+                if is_threat:
+                    threat_count += 1
+                else:
+                    safe_count += 1
 
-            emails_data.append({
-                "id": msg["id"],
-                "subject": subject,
-                "sender": sender,
-                "date": date,
-                "body": snippet,
-                "is_threat": is_threat,
-                "confidence": confidence
-            })
+                emails_data.append({
+                    "id": msg["id"],
+                    "subject": subject,
+                    "sender": sender,
+                    "date": date,
+                    "body": snippet,
+                    "is_threat": is_threat,
+                    "confidence": confidence
+                })
+            except Exception:
+                continue
 
             if len(emails_data) >= 100:
                 break
@@ -238,9 +239,13 @@ def login():
     flow = Flow.from_client_config(
         get_client_config(),
         scopes=SCOPES,
-        redirect_uri="https://fake-email-detection01.onrender.com/oauth2callback"
+        redirect_uri=REDIRECT_URI
     )
-    authorization_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true")
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
     session["state"] = state
     return redirect(authorization_url)
 
@@ -251,15 +256,13 @@ def oauth2callback():
         get_client_config(),
         scopes=SCOPES,
         state=state,
-        redirect_uri="https://fake-email-detection01.onrender.com/oauth2callback"
+        redirect_uri=REDIRECT_URI
     )
     
-    # Fix HTTPS proxy URL matching for Render
-    auth_response = request.url
-    if auth_response.startswith("http://"):
-        auth_response = auth_response.replace("http://", "https://", 1)
+    # Force HTTPS scheme in callback url
+    callback_url = request.url.replace("http://", "https://", 1)
 
-    flow.fetch_token(authorization_response=auth_response)
+    flow.fetch_token(authorization_response=callback_url)
     creds = flow.credentials
     session["credentials"] = {
         "token": creds.token,
