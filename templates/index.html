@@ -3,305 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DEVU — Real Gmail Threat Audit</title>
+    <title>Phishing Email Detection</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
     <style>
-        :root {
-            --bg-main: #f8fafc;
-            --surface-card: #ffffff;
-            --surface-input: #f1f5f9;
-            --border-subtle: #e2e8f0;
-            --primary-accent: #0284c7;
-            --primary-blue: #2563eb;
-            --text-main: #0f172a;
-            --text-muted: #64748b;
-        }
-
-        body {
-            background-color: var(--bg-main);
-            background-image: 
-                radial-gradient(at 10% 10%, rgba(2, 132, 199, 0.04) 0px, transparent 40%),
-                radial-gradient(at 90% 90%, rgba(37, 99, 235, 0.04) 0px, transparent 40%);
-            color: var(--text-main);
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            min-height: 100vh;
-        }
-
-        .navbar {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(14px);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .brand-text {
-            font-weight: 800;
-            font-size: 1.55rem;
-            letter-spacing: 1.2px;
-            background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .stat-card {
-            border-radius: 16px;
-            padding: 1.35rem;
-            color: #ffffff;
-            font-weight: 600;
-            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .stat-blue { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
-        .stat-red { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        .stat-green { background: linear-gradient(135deg, #10b981, #059669); }
-
-        .stat-number {
-            font-size: 2.3rem;
-            font-weight: 800;
-            font-family: 'JetBrains Mono', monospace;
-            line-height: 1;
-            margin-top: 0.5rem;
-        }
-
-        .scanner-card {
-            background: var(--surface-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: 20px;
-            padding: 2.2rem;
-            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.05);
-        }
-
-        .form-label {
-            font-size: 0.78rem;
-            font-weight: 700;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.6px;
-        }
-
-        .email-input {
-            background: var(--surface-input);
-            border: 1.5px solid var(--border-subtle);
-            color: var(--text-main);
-            font-family: 'JetBrains Mono', monospace;
-            border-radius: 10px;
-            padding: 0.75rem 1rem;
-            font-size: 0.95rem;
-            transition: all 0.2s ease;
-        }
-        .email-input:focus {
-            background: #ffffff;
-            border-color: var(--primary-accent);
-            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
-            color: var(--text-main);
-            outline: none;
-        }
-
-        .btn-google-login {
-            background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
-            border: none;
-            color: #ffffff;
-            font-weight: 700;
-            font-size: 1.05rem;
-            padding: 0.95rem 2.2rem;
-            border-radius: 12px;
-            transition: all 0.25s ease;
-            text-decoration: none;
-            display: inline-block;
-            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
-        }
-        .btn-google-login:hover {
-            opacity: 0.95;
-            transform: translateY(-2px);
-            box-shadow: 0 12px 25px rgba(37, 99, 235, 0.35);
-            color: #ffffff;
-        }
-
-        .btn-scan {
-            background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
-            border: none;
-            color: #ffffff;
-            font-weight: 700;
-            padding: 0.85rem;
-            border-radius: 10px;
-            transition: all 0.2s ease;
-            box-shadow: 0 6px 15px rgba(37, 99, 235, 0.2);
-        }
-        .btn-scan:hover {
-            opacity: 0.95;
-            color: #ffffff;
-            transform: translateY(-1px);
-            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
-        }
-
-        .email-feed-card {
-            background: #ffffff;
-            border: 1px solid var(--border-subtle);
-            border-radius: 14px;
-            padding: 1.35rem;
-            margin-bottom: 1.1rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .email-feed-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
-        }
-
-        .status-danger { border-left: 5px solid #ef4444 !important; }
-        .status-warning { border-left: 5px solid #f59e0b !important; }
-        .status-success { border-left: 5px solid #10b981 !important; }
-
-        .badge-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
-        .badge-warning { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
-        .badge-success { background: #d1fae5; color: #047857; border: 1px solid #a7f3d0; }
-
-        .badge-score {
-            background: #f1f5f9;
-            color: #334155;
-            border: 1px solid #e2e8f0;
-            font-weight: 600;
-        }
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card-custom { border-radius: 12px; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        .badge-phishing { background-color: #dc3545; font-size: 0.9rem; }
+        .badge-safe { background-color: #198754; font-size: 0.9rem; }
+        .table-responsive { max-height: 600px; overflow-y: auto; }
     </style>
 </head>
-<body>
-
-    <!-- Top Navbar -->
-    <nav class="navbar py-3 sticky-top">
-        <div class="container d-flex justify-content-between align-items-center">
-            <a class="navbar-brand d-flex align-items-center gap-2 m-0" href="/">
-                <i class="fa-solid fa-shield-cat text-primary fs-3"></i>
-                <span class="brand-text">DEVU</span>
-            </a>
-            <div>
-                {% if logged_in %}
-                    <a href="/logout" class="btn btn-outline-danger btn-sm px-3 rounded-pill fw-semibold">
-                        <i class="fa-solid fa-right-from-bracket me-1"></i> Disconnect
-                    </a>
-                {% else %}
-                    <span class="badge rounded-pill bg-light border text-primary px-3 py-2 small fw-semibold">
-                        <i class="fa-solid fa-shield-halved me-1"></i> Google API Engine
-                    </span>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
-
-    <div class="container my-4">
-        <!-- Stat Counters -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="stat-card stat-blue">
-                    <small class="text-white-50 text-uppercase fw-bold">Total Scanned Emails</small>
-                    <div class="stat-number">{{ stats.total }}</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="stat-card stat-red">
-                    <small class="text-white-50 text-uppercase fw-bold">Phishing Threats Caught</small>
-                    <div class="stat-number">{{ stats.phishing }}</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="stat-card stat-green">
-                    <small class="text-white-50 text-uppercase fw-bold">Safe Emails Verified</small>
-                    <div class="stat-number">{{ stats.safe }}</div>
-                </div>
+<body class="py-5">
+    <div class="container">
+        <div class="text-center mb-5">
+            <h1 class="fw-bold text-primary">🛡️ Fake & Phishing Email Detector</h1>
+            <p class="text-muted">Analyze manual text or connect your inbox for real-time scanning</p>
+            <div class="mt-3">
+                <a href="/login" class="btn btn-primary px-4 py-2 me-2">📥 Sign In & Scan Inbox</a>
+                <a href="/logout" class="btn btn-outline-secondary px-3 py-2">Logout / Clear</a>
             </div>
         </div>
 
-        {% if not logged_in %}
-            <!-- Logged Out / Connect View -->
-            <div class="row justify-content-center">
-                <div class="col-lg-8">
-                    <div class="scanner-card text-center py-5">
+        <!-- Manual Detection Section -->
+        <div class="row justify-content-center mb-5">
+            <div class="col-lg-8">
+                <div class="card card-custom p-4 bg-white">
+                    <h5 class="fw-semibold mb-3">Check Single Email Text</h5>
+                    <form method="POST" action="/">
                         <div class="mb-3">
-                            <i class="fa-brands fa-google fa-3x text-primary"></i>
+                            <textarea name="email_text" class="form-control" rows="4" placeholder="Paste email content, links, or text here...">{{ email_text or '' }}</textarea>
                         </div>
-                        <h3 class="fw-bold text-dark mb-2">Connect Your Google Inbox</h3>
-                        <p class="text-muted small mb-4 px-md-5">
-                            Authorize DEVU to directly audit up to 100 genuine incoming emails with AI heuristic analysis, SPF verification, and spoofing detection.
-                        </p>
-                        <a href="/login" class="btn btn-google-login">
-                            <i class="fa-brands fa-google me-2"></i> Sign In & Scan Inbox
-                        </a>
+                        <button type="submit" class="btn btn-dark w-100">Analyze Text</button>
+                    </form>
+
+                    {% if prediction %}
+                    <div class="mt-4 p-3 rounded text-center {% if prediction == 'Phishing' %}bg-danger text-white{% else %}bg-success text-white{% endif %}">
+                        <h4 class="m-0 fw-bold">Result: {{ prediction }}</h4>
                     </div>
+                    {% endif %}
                 </div>
             </div>
-        {% else %}
-            <!-- Logged In / Filter Controls -->
-            <div class="scanner-card mb-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <div>
-                        <h5 class="fw-bold text-dark mb-0"><i class="fa-solid fa-inbox text-primary me-2"></i>Audit Filter Controls</h5>
-                        <p class="text-muted small mb-0">Connected Account: <span class="text-dark fw-bold">{{ user_email }}</span></p>
-                    </div>
-                </div>
+        </div>
 
-                <form action="/filter" method="POST">
-                    <div class="row g-3 mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Scan Volume</label>
-                            <select name="scan_count" class="form-control email-input">
-                                <option value="100" {% if scan_count == 100 or not scan_count %}selected{% endif %}>100 Emails</option>
-                                <option value="50" {% if scan_count == 50 %}selected{% endif %}>50 Emails</option>
-                                <option value="25" {% if scan_count == 25 %}selected{% endif %}>25 Emails</option>
-                                <option value="10" {% if scan_count == 10 %}selected{% endif %}>10 Emails</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">From Date</label>
-                            <input type="date" name="from_date" class="form-control email-input" value="{{ from_date if from_date else '' }}">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">To Date</label>
-                            <input type="date" name="to_date" class="form-control email-input" value="{{ to_date if to_date else '' }}">
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-scan w-100">
-                        <i class="fa-solid fa-arrows-rotate me-1"></i> RUN 100-EMAIL AUDIT WITH FILTERS
-                    </button>
-                </form>
+        <!-- Scanned Inbox Results Section -->
+        {% if scanned_emails %}
+        <div class="card card-custom p-4 bg-white">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold m-0">Scanned Emails ({{ scanned_emails|length }})</h4>
             </div>
-
-            <!-- Email Feed -->
-            {% if emails %}
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="fw-bold text-secondary text-uppercase mb-0">Live Scanned Results</h6>
-                    <span class="badge bg-white text-secondary border px-3 py-1.5 rounded-pill">{{ emails|length }} Emails Analyzed</span>
-                </div>
-
-                {% for item in emails %}
-                    <div class="email-feed-card status-{{ item.class }}">
-                        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="badge badge-{{ item.class }} px-2.5 py-1.5 rounded-pill fw-bold">
-                                    <i class="fa-solid {{ 'fa-triangle-exclamation' if item.class == 'danger' else ('fa-circle-exclamation' if item.class == 'warning' else 'fa-circle-check') }} me-1"></i>
-                                    {{ item.status }}
-                                </span>
-                                <small class="text-muted"><i class="fa-regular fa-calendar me-1"></i> {{ item.date }}</small>
-                            </div>
-                            <span class="badge badge-score px-2.5 py-1.5 rounded-pill">
-                                {{ item.confidence }}% Threat Confidence
-                            </span>
-                        </div>
-
-                        <h6 class="fw-bold text-dark mb-1">{{ item.subject }}</h6>
-                        <p class="text-muted small mb-2"><i class="fa-regular fa-envelope me-1"></i> {{ item.sender }}</p>
-                        <p class="text-secondary small mb-0">{{ item.snippet }}</p>
-                    </div>
-                {% endfor %}
-            {% else %}
-                <div class="text-center py-5 text-muted">
-                    <i class="fa-regular fa-folder-open fa-2x mb-2 text-secondary"></i>
-                    <p class="mb-0">No emails match the selected criteria.</p>
-                </div>
-            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 25%;">From</th>
+                            <th style="width: 25%;">Subject</th>
+                            <th style="width: 35%;">Snippet Preview</th>
+                            <th style="width: 15%; text-align: center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for email in scanned_emails %}
+                        <tr>
+                            <td><strong class="text-break">{{ email.sender }}</strong></td>
+                            <td class="text-break">{{ email.subject }}</td>
+                            <td><small class="text-muted text-break">{{ email.snippet }}</small></td>
+                            <td class="text-center">
+                                {% if email.status == 'Phishing' %}
+                                    <span class="badge badge-phishing text-white px-3 py-2">Phishing ⚠️</span>
+                                {% else %}
+                                    <span class="badge badge-safe text-white px-3 py-2">Safe ✅</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
         {% endif %}
     </div>
-
 </body>
 </html>
