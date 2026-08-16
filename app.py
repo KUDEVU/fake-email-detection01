@@ -1,158 +1,148 @@
 import os
-import re
-import joblib
-import tldextract
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, redirect, url_for, session, render_template_string, request
+from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 app = Flask(__name__)
-app.secret_key = 'devu_fast_super_key_2026'
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_key_change_me")
 
-CLIENT_SECRETS_FILE = 'credentials.json'
-SCOPES = [
-    'openid',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/gmail.readonly'
-]
+# Gmail Readonly Scope
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-model = None
-vectorizer = None
+# OAuth credentials setup from file or environment
+CLIENT_SECRETS_FILE = "credentials.json"
 
-try:
-    if os.path.exists('phishing_model.pkl'):
-        model = joblib.load('phishing_model.pkl')
-    if os.path.exists('tfidf_vectorizer.pkl'):
-        vectorizer = joblib.load('tfidf_vectorizer.pkl')
-except Exception as e:
-    print(f"Model load notice: {e}")
 
-def predict_email(text):
-    if not text:
-        return "Safe"
-    suspicious_patterns = [
-        r'verify', r'urgent', r'bank', r'password', 
-        r'suspend', r'login', r'click here', 
-        r'account blocked', r'update payment', r'security alert'
-    ]
-    if any(re.search(p, text, re.IGNORECASE) for p in suspicious_patterns):
-        return "Phishing"
-        
-    if model is not None and vectorizer is not None:
-        try:
-            vec = vectorizer.transform([text])
-            pred = model.predict(vec)[0]
-            return "Phishing" if pred == 1 else "Safe"
-        except Exception:
-            pass
-    return "Safe"
+@app.route("/")
+def index():
+    if "credentials" not in session:
+        return '<a href="/login"><button>Login with Google</button></a>'
 
-def get_flow():
-    redirect_uri = url_for('callback', _external=True)
-    if request.headers.get('X-Forwarded-Proto') == 'https':
-        redirect_uri = redirect_uri.replace('http://', 'https://')
-        
+    # Load stored user credentials from session
+    creds = Credentials(**session["credentials"])
+    service = build("gmail", "v1", credentials=creds)
+
+    emails_data = []
+
+    # Initialize request to list emails without strict result slicing
+    request = service.users().messages().list(userId="me", maxResults=50)
+
+    # Paginate through inbox messages
+    while request is not None:
+        response = request.execute()
+        messages = response.get("messages", [])
+
+        if not messages:
+            break
+
+        for msg in messages:
+            msg_detail = service.users().messages().get(
+                userId="me", id=msg["id"], format="full"
+            ).execute()
+
+            headers = msg_detail.get("payload", {}).get("headers", [])
+            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
+            sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
+            date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+            snippet = msg_detail.get("snippet", "")
+
+            emails_data.append({
+                "id": msg["id"],
+                "subject": subject,
+                "sender": sender,
+                "date": date,
+                "body": snippet,
+            })
+
+        # Fetch next page if available, otherwise breaks the loop
+        request = service.users().messages().list_next(
+            previous_request=request, previous_response=response
+        )
+
+        # Safety cap: stops after 100 emails to prevent long request timeouts
+        if len(emails_data) >= 100:
+            break
+
+    # Inline HTML template to display all fetched emails
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>DEVU - Email Dashboard</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f6f8; }
+            .card { background: white; padding: 20px; margin-bottom: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .header { font-weight: bold; font-size: 16px; margin-bottom: 5px; }
+            .sender { color: #555; font-size: 14px; margin-bottom: 8px; }
+            .date { color: #888; font-size: 12px; float: right; }
+            .body { color: #333; font-size: 14px; }
+        </style>
+    </head>
+    <body>
+        <h2>Fetched Emails (Total: {{ emails|length }})</h2>
+        <a href="/logout">Logout</a>
+        <hr>
+        {% for email in emails %}
+        <div class="card">
+            <span class="date">{{ email.date }}</span>
+            <div class="header">{{ email.subject }}</div>
+            <div class="sender">From: {{ email.sender }}</div>
+            <div class="body">{{ email.body }}</div>
+        </div>
+        {% endfor %}
+    </body>
+    </html>
+    """
+
+    return render_template_string(html_template, emails=emails_data)
+
+
+@app.route("/login")
+def login():
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_FILE,
         scopes=SCOPES,
-        redirect_uri=redirect_uri
+        redirect_uri=url_for("oauth2callback", _external=True),
     )
-    return flow
-
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    prediction = None
-    email_text = ""
-    if request.method == 'POST':
-        email_text = request.form.get('email_text', '')
-        if email_text.strip():
-            prediction = predict_email(email_text)
-    return render_template('index.html', prediction=prediction, email_text=email_text)
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    flow = get_flow()
     authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent'
+        access_type="offline", include_granted_scopes="true"
     )
-    session['state'] = state
+    session["state"] = state
     return redirect(authorization_url)
 
-@app.route('/callback', methods=['GET', 'POST'])
-def callback():
-    state = session.get('state')
-    flow = get_flow()
-    
-    req_url = request.url
-    if request.headers.get('X-Forwarded-Proto') == 'https':
-        req_url = req_url.replace('http://', 'https://')
 
-    flow.fetch_token(authorization_response=req_url)
-    credentials = flow.credentials
-    session['credentials'] = {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
+@app.route("/oauth2callback")
+def oauth2callback():
+    state = session["state"]
+    flow = Flow.from_client_secrets_file(
+        CLIENT_SECRETS_FILE,
+        scopes=SCOPES,
+        state=state,
+        redirect_uri=url_for("oauth2callback", _external=True),
+    )
+    flow.fetch_token(authorization_response=request.url)
+
+    creds = flow.credentials
+    session["credentials"] = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": creds.scopes,
     }
-    return redirect(url_for('scan_inbox'))
 
-@app.route('/scan', methods=['GET', 'POST'])
-@app.route('/filter', methods=['GET', 'POST'])
-def scan_inbox():
-    if 'credentials' not in session:
-        return redirect(url_for('login'))
+    return redirect(url_for("index"))
 
-    creds_data = session['credentials']
-    credentials = Credentials(**creds_data)
 
-    try:
-        service = build('gmail', 'v1', credentials=credentials)
-        # Fetching up to 100 emails
-        results = service.users().messages().list(userId='me', maxResults=100).execute()
-        messages = results.get('messages', [])
-        
-        scanned_emails = []
-        for msg in messages:
-            msg_data = service.users().messages().get(
-                userId='me', 
-                id=msg['id'], 
-                format='metadata', 
-                metadataHeaders=['From', 'Subject']
-            ).execute()
-            
-            headers = msg_data.get('payload', {}).get('headers', [])
-            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
-            sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), 'Unknown Sender')
-            snippet = msg_data.get('snippet', '')
-
-            full_text = f"{subject} {snippet}"
-            status = predict_email(full_text)
-            
-            scanned_emails.append({
-                'sender': sender,
-                'subject': subject,
-                'snippet': snippet,
-                'status': status
-            })
-
-        return render_template('index.html', scanned_emails=scanned_emails)
-    except Exception as e:
-        print(f"Gmail fetch error: {e}")
-        return redirect(url_for('index'))
-
-@app.route('/logout', methods=['GET', 'POST'])
+@app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for('index'))
+    return redirect(url_for("index"))
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+
+if __name__ == "__main__":
+    # Required for testing on local HTTP (remove in production if HTTPS is enforced)
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    app.run(host="0.0.0.0", port=5000, debug=True)
