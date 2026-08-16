@@ -33,9 +33,14 @@ except Exception as e:
 def predict_email(text):
     if not text:
         return "Safe"
-    suspicious_patterns = [r'verify', r'urgent', r'bank', r'password', r'suspend', r'login', r'click here', r'account blocked', r'update payment', r'security alert']
+    suspicious_patterns = [
+        r'verify', r'urgent', r'bank', r'password', 
+        r'suspend', r'login', r'click here', 
+        r'account blocked', r'update payment', r'security alert'
+    ]
     if any(re.search(p, text, re.IGNORECASE) for p in suspicious_patterns):
         return "Phishing"
+        
     if model is not None and vectorizer is not None:
         try:
             vec = vectorizer.transform([text])
@@ -49,6 +54,7 @@ def get_flow():
     redirect_uri = url_for('callback', _external=True)
     if request.headers.get('X-Forwarded-Proto') == 'https':
         redirect_uri = redirect_uri.replace('http://', 'https://')
+        
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_FILE,
         scopes=SCOPES,
@@ -81,9 +87,11 @@ def login():
 def callback():
     state = session.get('state')
     flow = get_flow()
+    
     req_url = request.url
     if request.headers.get('X-Forwarded-Proto') == 'https':
         req_url = req_url.replace('http://', 'https://')
+
     flow.fetch_token(authorization_response=req_url)
     credentials = flow.credentials
     session['credentials'] = {
@@ -107,19 +115,37 @@ def scan_inbox():
 
     try:
         service = build('gmail', 'v1', credentials=credentials)
-        results = service.users().messages().list(userId='me', maxResults=3).execute()
+        # Fetching up to 100 emails
+        results = service.users().messages().list(userId='me', maxResults=100).execute()
         messages = results.get('messages', [])
         
         scanned_emails = []
         for msg in messages:
-            msg_data = service.users().messages().get(userId='me', id=msg['id'], format='snippet').execute()
+            msg_data = service.users().messages().get(
+                userId='me', 
+                id=msg['id'], 
+                format='metadata', 
+                metadataHeaders=['From', 'Subject']
+            ).execute()
+            
+            headers = msg_data.get('payload', {}).get('headers', [])
+            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
+            sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), 'Unknown Sender')
             snippet = msg_data.get('snippet', '')
-            status = predict_email(snippet)
-            scanned_emails.append({'snippet': snippet, 'status': status})
+
+            full_text = f"{subject} {snippet}"
+            status = predict_email(full_text)
+            
+            scanned_emails.append({
+                'sender': sender,
+                'subject': subject,
+                'snippet': snippet,
+                'status': status
+            })
 
         return render_template('index.html', scanned_emails=scanned_emails)
     except Exception as e:
-        print(f"Gmail error: {e}")
+        print(f"Gmail fetch error: {e}")
         return redirect(url_for('index'))
 
 @app.route('/logout', methods=['GET', 'POST'])
