@@ -1,12 +1,13 @@
 import os
 import re
+import html
 import requests
 from flask import Flask, redirect, url_for, session, render_template_string, request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_secret_key_production_2026")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_production_secret_key_fixed_2026")
 app.config['SESSION_COOKIE_NAME'] = 'devu_session'
 app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -31,7 +32,7 @@ DEVU_TEMPLATE = """
         .navbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
         .logo-box { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 24px; color: #2563eb; }
         .shield-icon { width: 28px; height: 28px; fill: #2563eb; }
-        .disconnect-btn { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border: 1.5px solid #ef4444; color: #ef4444; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; background: white; }
+        .disconnect-btn { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border: 1.5px solid #ef4444; color: #ef4444; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; background: white; transition: 0.2s; }
         .disconnect-btn:hover { background: #fee2e2; }
         
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
@@ -44,7 +45,7 @@ DEVU_TEMPLATE = """
 
         .filter-bar { background: white; padding: 14px 20px; border-radius: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex-wrap: wrap; gap: 10px; }
         .filter-form { display: flex; align-items: center; gap: 10px; }
-        .filter-select { padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13.5px; outline: none; }
+        .filter-select { padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13.5px; outline: none; background: white; }
         .filter-submit { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
         .email-card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); border-left: 6px solid #16a34a; }
@@ -55,7 +56,7 @@ DEVU_TEMPLATE = """
         .badge-threat { background: #fee2e2; color: #dc2626; padding: 4px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; }
         .threat-badge { background: #f8fafc; border: 1px solid #e2e8f0; color: #334155; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
         .email-subject { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
-        .email-sender { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #475569; margin-bottom: 10px; }
+        .email-sender { font-size: 14px; color: #475569; margin-bottom: 10px; }
         .email-body { font-size: 13.5px; color: #64748b; line-height: 1.5; word-break: break-word; }
 
         .login-card { background: white; padding: 48px; border-radius: 16px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 40px; }
@@ -134,14 +135,28 @@ DEVU_TEMPLATE = """
 """
 
 def detect_threat(subject, snippet, sender):
-    suspicious_patterns = [
-        r"exposed", r"security alert", r"password reset", r"unauthorized", 
-        r"verify your account", r"suspended", r"leak", r"compromised", r"action required", r"urgent", r"winner", r"lottery"
+    sender_lower = sender.lower()
+    combined_text = f"{subject} {snippet}".lower()
+    
+    # 1. Trusted legitimate system senders
+    if any(trusted in sender_lower for trusted in ["@accounts.google.com", "@google.com", "no-reply@accounts.google.com", "notifications.google.com"]):
+        return False, 5.0
+
+    # 2. Strong Spam / Lottery / Phishing indicators
+    spam_patterns = [
+        r"won a\b", r"won a car", r"winner", r"lottery", r"congratulations.*won",
+        r"prize", r"claim.*money", r"free money", r"inheritance", r"bitcoin.*transfer",
+        r"urgent wire", r"verify your bank", r"unclaimed prize", r"wonman\.com",
+        r"password expired.*click", r"account suspended.*click here"
     ]
-    combined_text = f"{subject} {snippet} {sender}".lower()
-    for pattern in suspicious_patterns:
+    for pattern in spam_patterns:
         if re.search(pattern, combined_text):
             return True, 95.0
+
+    # 3. Impersonation / Generic Phishing keywords
+    if any(k in combined_text for k in ["won a car", "claim prize", "free gift", "100% free bonus"]):
+        return True, 90.0
+
     return False, 5.0
 
 @app.route("/")
@@ -167,6 +182,7 @@ def index():
 
     req = service.users().messages().list(userId="me", q=query, maxResults=50)
 
+    # Fetch full batch of up to 100 emails using pagination
     while req is not None and len(emails_data) < 100:
         response = req.execute()
         messages = response.get("messages", [])
@@ -180,7 +196,7 @@ def index():
                 subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
                 sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
                 date = next((h["value"] for h in headers if h["name"] == "Date"), "")
-                snippet = msg_detail.get("snippet", "")
+                snippet = html.unescape(msg_detail.get("snippet", ""))
 
                 is_threat, confidence = detect_threat(subject, snippet, sender)
                 if is_threat:
@@ -239,7 +255,6 @@ def oauth2callback():
     client_id = os.environ.get("GOOGLE_CLIENT_ID", CLIENT_ID).strip()
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", CLIENT_SECRET).strip()
 
-    # Direct Token Exchange (Guaranteed no PKCE/Verifier errors)
     token_response = requests.post(
         TOKEN_URI,
         data={
