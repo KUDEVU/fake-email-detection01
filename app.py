@@ -5,12 +5,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-# Disable HTTPS check on proxy & relax scope checks
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_devu_secret_998877")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "devu_secret_key_fixed_9988")
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -247,6 +246,9 @@ def login():
         prompt="consent"
     )
     session["state"] = state
+    # Save code_verifier explicitly to fix "Missing code verifier"
+    if hasattr(flow, "code_verifier") and flow.code_verifier:
+        session["code_verifier"] = flow.code_verifier
     return redirect(authorization_url)
 
 @app.route("/oauth2callback")
@@ -259,7 +261,10 @@ def oauth2callback():
         redirect_uri=REDIRECT_URI
     )
     
-    # Force HTTPS scheme in callback url
+    # Restore code_verifier
+    if "code_verifier" in session:
+        flow.code_verifier = session["code_verifier"]
+
     callback_url = request.url.replace("http://", "https://", 1)
 
     flow.fetch_token(authorization_response=callback_url)
